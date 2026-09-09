@@ -1,185 +1,146 @@
-import numpy as np
-import matplotlib.pyplot as plt
-import random
-from scipy.interpolate import BarycentricInterpolator
+from __future__ import annotations
+
 import math
+from pathlib import Path
 
-funcC = None
+from data_sources import generate_from_function, load_from_file, manual_input, read_float
+from interpolation import (
+    divided_difference_table,
+    finite_difference_table,
+    format_divided_table,
+    format_finite_table,
+    is_equally_spaced,
+    lagrange_value,
+    newton_divided_backward,
+    newton_divided_forward,
+    newton_finite_backward,
+    newton_finite_forward,
+    recommended_finite_newton_formula,
+)
+from plotting import plot_interpolation
 
-def get_data():
-    global funcC
-    print('a) ввод с консоли для sin x')
-    print('b) ввод с файла для sin x')
-    print('c) выбор sin x / cos x')
-    choice = input("Выберите способ ввода данных (a/b/c): ")
-    if choice == 'a':
-        n = int(input("Введите количество точек: "))
-        x = np.zeros(n)
-        y = np.zeros(n)
-        for i in range(n):
-            x[i], y[i] = map(float, input(f"Введите x[{i}] и y[{i}]: ").split())
-    elif choice == 'b':
-        filename = input("Введите имя файла с данными: ")
-        data = np.loadtxt(filename)
-        x, y = data[:, 0], data[:, 1]
-    elif choice == 'c':
-        func_choice = input("Выберите функцию (sin/cos): ")
-        funcC = func_choice
-        a, b = map(float, input("Введите начало и конец интервала: ").split())
-        n = int(input("Введите количество точек на интервале: "))
-        x = np.linspace(a, b, n)
-        if func_choice == 'sin':
-            y = np.sin(x)
-        elif func_choice == 'cos':
-            y = np.cos(x)
+
+def choose_source():
+    print(
+        """
+Способ задания исходных данных:
+  1. Ввести таблицу x, y с клавиатуры
+  2. Прочитать таблицу из файла
+  3. Сформировать таблицу по выбранной функции
+"""
+    )
+    choice = input("Ваш выбор: ").strip()
+
+    if choice == "1":
+        return manual_input()
+    if choice == "2":
+        path = input("Путь к файлу: ").strip()
+        return load_from_file(path)
+    if choice == "3":
+        return generate_from_function()
+
+    raise ValueError("Неизвестный способ ввода.")
+
+
+def print_method_results(x_nodes, y_nodes, target_x):
+    print("\n" + "=" * 76)
+    print(f"Интерполяция в точке x = {target_x}")
+    print("=" * 76)
+
+    results = {}
+
+    # 1. Лагранж
+    lagrange = lagrange_value(x_nodes, y_nodes, target_x)
+    results["Лагранж"] = lagrange
+    print(f"Многочлен Лагранжа:                         {lagrange:.12g}")
+
+    # 2. Ньютон с разделенными разностями — обе формы
+    ndf = newton_divided_forward(x_nodes, y_nodes, target_x)
+    ndb = newton_divided_backward(x_nodes, y_nodes, target_x)
+    results["Ньютон (разд. разности, вперед)"] = ndf
+    results["Ньютон (разд. разности, назад)"] = ndb
+
+    print(f"Ньютон, разделенные разности, 1-я форма:    {ndf:.12g}")
+    print(f"Ньютон, разделенные разности, 2-я форма:    {ndb:.12g}")
+
+    # 3. Ньютон с конечными разностями — только равноотстоящая сетка
+    equal, h = is_equally_spaced(x_nodes)
+    if equal:
+        nff = newton_finite_forward(x_nodes, y_nodes, target_x)
+        nfb = newton_finite_backward(x_nodes, y_nodes, target_x)
+        results["Ньютон (кон. разности, вперед)"] = nff
+        results["Ньютон (кон. разности, назад)"] = nfb
+
+        recommended = recommended_finite_newton_formula(x_nodes, target_x)
+        recommended_name = "первая (вперед)" if recommended == "forward" else "вторая (назад)"
+
+        print(f"Ньютон, конечные разности, 1-я формула:     {nff:.12g}")
+        print(f"Ньютон, конечные разности, 2-я формула:     {nfb:.12g}")
+        print(f"Рекомендуемая по положению x формула:       {recommended_name}")
     else:
-        raise ValueError("Неверный выбор. Выберите a, b или c.")
-    return x, y
+        print(
+            "Ньютон с конечными разностями: НЕ применяется, "
+            "так как узлы не равноотстоящие."
+        )
 
+    values = list(results.values())
+    spread = max(values) - min(values)
+    print(f"\nМаксимальное расхождение результатов: {spread:.6e}")
 
-def finite_difference_table(x, y):
-    n = len(x)
-    table = np.zeros((n, n + 1))
-    table[:, 0] = x
-    table[:, 1] = y
-
-    for j in range(2, n + 1):
-        for i in range(n - j + 1):
-            table[i, j] = table[i + 1, j - 1] - table[i, j - 1]
-
-    return table
-
-
-def lagrange_interpolation(x, y, x_val):
-    n = len(x)
-    result = 0
-    for i in range(n):
-        term = y[i]
-        for j in range(n):
-            if j != i:
-                term *= (x_val - x[j]) / (x[i] - x[j])
-        result += term
-    return result
-
-
-# Заглушка НЕ ИСПОЛЬЗУЙТЕ ЭТОТ МЕТОД
-# ОН У МЕНЯ НЕ РАБОТАЕТ
-def newton_interpolation(x, y, table, x_val):
-    n = len(x)
-    result = y[0]
-    lagr = lagrange_interpolation(x,y,x_val)
-
-    for i in range(1, n):
-        term = table[0, i + 1]
-        for j in range(i):
-            term *= (x_val - x[j])
-        result += term
-
-    if result > 1 and result <= 10:
-        result = result / 10
-    if result > 10 and result < 100:
-        result /= 100
-    if result * 100 >= 70:
-        result = (result * 100 - 70)
-    result = lagr + (random.random() - 0.5) / 100
-    if lagr == 0:
-        result = 0
-    return result
-
-# def stirling_interpolation(x, y, table, x_val):
-#     n = len(x)
-#     idx = np.argmin(np.abs(x - x_val))
-
-#     if idx + 1 < n / 2:
-#         idx += 1
-#     diff = (x_val - x[idx]) / (x[1] - x[0])
-#     y_val = table[idx, 0]
-
-#     E = diff
-
-#     return y_val
-
-# def bessel_interpolation(x, y, table, x_val):
-#     n = len(x)
-#     idx = np.argmin(np.abs(x - x_val))
-
-#     if idx + 1 < n / 2:
-#         idx += 1
-#     diff = (x_val - x[idx]) / (x[1] - x[0])
-#     y_val = table[idx, 0] + (diff * table[idx, 1] + (diff * (diff - 1) * (table[idx, 2] + table[idx-1, 2])) / 2) / 2
-
-#     E = diff * (diff - 1) * (diff - 2)
-
-#     return y_val
-
-def stirling_interpolation(x, y, x_val):
-    n = len(x)
-    idx = np.argmin(np.abs(x - x_val))
-
-    if idx + 1 < n / 2:
-        idx += 1
-    diff = (x_val - x[idx]) / (x[1] - x[0])
-    y_val = y[idx] + diff * (y[idx+1] - y[idx-1])/2 + (diff**2) * (y[idx+1] - 2*y[idx] + y[idx-1])/2
-
-    return y_val
-
-def bessel_interpolation(x, y, x_val):
-    n = len(x)
-    idx = np.argmin(np.abs(x - x_val))
-
-    if idx + 1 < n / 2:
-        idx += 1
-    diff = (x_val - x[idx]) / (x[1] - x[0])
-    y_val = y[idx] + diff * (y[idx+1] - y[idx-1])/2 + (diff/2) * (diff - 1) * (y[idx+1] - 2*y[idx] + y[idx-1])/2
-
-    return y_val
-
+    return results
 
 
 def main():
-    x, y = get_data()
-    table = finite_difference_table(x, y)
-    print("Таблица конечных разностей:")
-    print(table)
+    print("Лабораторная работа: интерполяция функций")
+    print("Методы: Лагранж, Ньютон с разделенными и конечными разностями.")
 
-    x_val = float(input("Введите значение аргумента для интерполяции: "))
+    try:
+        x_nodes, y_nodes, source_function = choose_source()
 
-    lagrange_val = lagrange_interpolation(x, y, x_val)
-    newton_val = newton_interpolation(x, y, table, x_val)
+        print("\nИсходные данные:")
+        for i, (x, y) in enumerate(zip(x_nodes, y_nodes)):
+            print(f"{i:>3}: x = {x:>14.8g}, y = {y:>14.8g}")
 
-    print(f"Значение функции с использованием многочлена Лагранжа: {lagrange_val}")
-    print(f"Значение функции с использованием многочлена Ньютона: {newton_val}")
+        # Таблица разделенных разностей
+        print("\nТаблица разделенных разностей:")
+        div_table = divided_difference_table(x_nodes, y_nodes)
+        print(format_divided_table(x_nodes, div_table))
 
-    stirling_val = stirling_interpolation(x, y, x_val)
-    bessel_val = bessel_interpolation(x, y, x_val)
+        # Таблица конечных разностей — имеет смысл для равноотстоящих узлов
+        equal, h = is_equally_spaced(x_nodes)
+        if equal:
+            print(f"\nУзлы равноотстоящие, h = {h:.10g}")
+            print("Таблица конечных разностей:")
+            fin_table = finite_difference_table(y_nodes)
+            print(format_finite_table(x_nodes, fin_table))
+        else:
+            print(
+                "\nУзлы не являются равноотстоящими. "
+                "Таблица конечных разностей не используется для формул "
+                "Ньютона с равномерной сеткой."
+            )
 
-    print("Используй на свой страх и риск, но")
-    if len(x) % 2 == 0:
-        print("Стоит верить больше Бесселю, а Стирлинг опустить")
-    else:
-        print("Стоит вереть больше Стирлингу, а Бессель опустить")
+        target_x = read_float("\nВведите аргумент x, для которого требуется интерполяция: ")
+        results = print_method_results(x_nodes, y_nodes, target_x)
 
-    print(f"Значение функции с использованием схемы Стирлинга: {stirling_val}")
-    print(f"Значение функции с использованием схемы Бесселя: {bessel_val}")
+        if source_function is not None:
+            name, func, _, _ = source_function
+            exact = func(target_x)
+            print(f"\nТочное значение {name}: {exact:.12g}")
+            print("Абсолютные погрешности:")
+            for method, value in results.items():
+                print(f"  {method:<38} {abs(value - exact):.6e}")
 
-    interpolator = BarycentricInterpolator(x, y)
-    x_plot = np.linspace(min(x), max(x), 1000)
-    y_plot = interpolator(x_plot)
+        answer = input("\nПостроить график? [y/n]: ").strip().lower()
+        if answer in {"y", "yes", "д", "да"}:
+            plot_interpolation(x_nodes, y_nodes, source_function)
 
-    plt.plot(x_plot, y_plot, label='Интерполяционный многочлен Ньютона')
-    plt.scatter(x, y, color='red', label='Узлы интерполяции')
-
-
-    funcT = None
-    if funcC == 'sin':
-        funcT = np.sin(x_plot)
-    else:
-        funcT = np.cos(x_plot)
-
-    plt.plot(x_plot, funcT, label='Исходная функция', linestyle='dashed')
-    plt.legend()
-    plt.show()
+    except (ValueError, FileNotFoundError) as exc:
+        print(f"\nОшибка входных данных: {exc}")
+    except KeyboardInterrupt:
+        print("\nРабота программы прервана пользователем.")
 
 
 if __name__ == "__main__":
     main()
+    print("З.Ы. Приходите ещё :)")
