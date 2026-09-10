@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import math
-from pathlib import Path
 
 from data_sources import generate_from_function, load_from_file, manual_input, read_float
 from interpolation import (
@@ -133,7 +131,7 @@ def main():
 
         answer = input("\nПостроить график? [y/n]: ").strip().lower()
         if answer in {"y", "yes", "д", "да"}:
-            plot_interpolation(x_nodes, y_nodes, source_function)
+            plot_interpolation(x_nodes, y_nodes, target_x, source_function)
 
     except (ValueError, FileNotFoundError) as exc:
         print(f"\nОшибка входных данных: {exc}")

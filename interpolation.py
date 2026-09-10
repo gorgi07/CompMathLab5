@@ -106,7 +106,7 @@ def newton_divided_backward(
 ) -> float:
     """
     Вторая форма Ньютона с разделенными разностями (назад):
-    N_n(x) = f(xn) + f[x_{n-1},xn](x-xn) + ...
+    N_n(x) = f(xn) + f[x_{n-1}, xn](x-xn) + ...
     """
     table = divided_difference_table(x_nodes, y_nodes)
     n = len(x_nodes)
